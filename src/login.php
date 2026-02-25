@@ -49,7 +49,7 @@ function isActiveForm($formName, $activeForm)
 <body>
   <nav class="navbar navbar-expand-lg fixed-top">
     <div class="container-fluid position-relative">
-      <a class="navbar-brand d-flex align-items-center" href="index.html">
+      <a class="navbar-brand d-flex align-items-center" href="index.php">
         <img
           src="assets/images/coffee.png"
           alt="Kape't Ani Logo"
@@ -79,7 +79,8 @@ function isActiveForm($formName, $activeForm)
       <form action="login_register.php" method="post">
         <h2>Register</h2>
         <?= showError($errors['register']); ?>
-        <input type="text" name="name" placeholder="Name" required>
+        <input type="text" name="first_name" placeholder="First Name" required>
+        <input type="text" name="last_name" placeholder="Last Name" required>
         <input type="email" name="email" placeholder="Email" required>
         <input type="password" name="password" placeholder="Password" required>
         <select name="role" required>
