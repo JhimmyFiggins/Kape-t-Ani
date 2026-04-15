@@ -9,11 +9,67 @@ import Badge       from "../components/Badge";
 import PageHeader  from "../components/PageHeader";
 import SlidePanel  from "../components/SlidePanel";
 import { maskEmail } from "../utils";
+import { canAssignElevatedRoles, canManageAdminPanels } from "../utils";
 import { LINK_PATH } from "../data/LinkPath.jsx";
 import { useCache }  from "../data/CacheContext";   // ← NEW
+import { PHONE_COUNTRIES, digitsOnly, formatLocalPhone11, splitStoredPhone, composeStoredPhone } from "../../utils/phone";
 
 const API        = `${LINK_PATH}usersController.php`;
 const CACHE_KEY  = "users";
+
+function EyeIcon({ open }) {
+  return open ? (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path
+        d="M2 12C3.8 8.2 7.5 6 12 6C16.5 6 20.2 8.2 22 12C20.2 15.8 16.5 18 12 18C7.5 18 3.8 15.8 2 12Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  ) : (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden="true"
+    >
+      <path d="M3 3L21 21" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path
+        d="M10.6 6.2C11.1 6.07 11.55 6 12 6C16.5 6 20.2 8.2 22 12C21.15 13.79 19.85 15.28 18.23 16.37"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6.1 7.9C4.39 8.99 3.01 10.43 2 12C3.8 15.8 7.5 18 12 18C13.81 18 15.48 17.64 16.94 16.99"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9.9 9.9C9.36 10.44 9 11.18 9 12C9 13.66 10.34 15 12 15C12.82 15 13.56 14.64 14.1 14.1"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 function authHeader() {
   const token = localStorage.getItem("token");
@@ -28,6 +84,9 @@ const EMPTY_FORM = {
   first_name: "",
   last_name:  "",
   email:      "",
+  phone:      "",
+  address:    "",
+  postalcode: "",
   password:   "",
   status:     "user",
 };
@@ -110,16 +169,93 @@ function ImageBlock({ preview, onFileChange, onRemove }) {
 
 // ─── User Form ────────────────────────────────────────────────────────────────
 
-function UserForm({ form, onChange, mode, imagePreview, onFileChange, onRemoveImage }) {
+function ThemedSelect({ value, onChange, options, placeholder = "Select role", disabled = false }) {
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef(null);
+  const selected = options.find(o => o.value === value);
+
+  useEffect(() => {
+    function onOutsideClick(e) {
+      if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onOutsideClick);
+    return () => document.removeEventListener("mousedown", onOutsideClick);
+  }, []);
+
+  return (
+    <div className={`kp-select${open ? " open" : ""}`} ref={boxRef}>
+      <button
+        type="button"
+        className="kp-select-trigger"
+        onClick={() => !disabled && setOpen(prev => !prev)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        disabled={disabled}
+      >
+        <span>{selected?.label ?? placeholder}</span>
+        <i className="bi bi-chevron-down" />
+      </button>
+      {open && (
+        <div className="kp-select-menu" role="listbox">
+          {options.map(opt => (
+            <button
+              type="button"
+              key={opt.value}
+              className={`kp-select-option${value === opt.value ? " active" : ""}`}
+              onClick={() => {
+                onChange(opt.value);
+                setOpen(false);
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UserForm({ form, onChange, mode, imagePreview, onFileChange, onRemoveImage, canAssignElevated }) {
+  const [showPassword, setShowPassword] = useState(false);
+  const [phoneCountry, setPhoneCountry] = useState(() => splitStoredPhone(form.phone || "").iso2);
+  const selectedPhoneCountry = PHONE_COUNTRIES.find((c) => c.iso2 === phoneCountry) || PHONE_COUNTRIES[0];
+  const roleLocked = !canAssignElevated && (form.status === "admin" || form.status === "superadmin");
+
+  useEffect(() => {
+    // Reset toggle when switching between users / modes.
+    setShowPassword(false);
+  }, [mode, form?.email]);
+
+  useEffect(() => {
+    setPhoneCountry(splitStoredPhone(form.phone || "").iso2);
+  }, [form.phone]);
+
   const fields = [
     { label: "First Name", id: "first_name", type: "text",  placeholder: "First name" },
     { label: "Last Name",  id: "last_name",  type: "text",  placeholder: "Last name" },
     { label: "Email",      id: "email",      type: "email", placeholder: "email@example.com" },
+    { label: "Phone",      id: "phone",      type: "tel",   placeholder: "0000 000 0000" },
+    { label: "Address",    id: "address",    type: "text",  placeholder: "Street address" },
+    { label: "Postal Code",id: "postalcode", type: "text",  placeholder: "Postal code" },
     {
-      label: "Password", id: "password", type: "text",
-      placeholder: mode === "edit" ? "Leave blank to keep current" : "Password",
+      label: "Password", id: "password", type: "password",
+      placeholder: mode === "edit" ? "Leave blank to keep current password" : "Password",
     },
   ];
+
+  const roleOptions = [
+    { value: "user", label: "User" },
+    { value: "staff", label: "Staff" },
+    ...(canAssignElevated ? [
+      { value: "admin", label: "Admin" },
+      { value: "superadmin", label: "SuperAdmin" },
+    ] : []),
+  ];
+
+  if (!canAssignElevated && (form.status === "admin" || form.status === "superadmin")) {
+    roleOptions.push({ value: form.status, label: `${form.status === "admin" ? "Admin" : "SuperAdmin"} (Locked)` });
+  }
 
   return (
     <>
@@ -127,18 +263,91 @@ function UserForm({ form, onChange, mode, imagePreview, onFileChange, onRemoveIm
       {fields.map(f => (
         <div className="form-group" key={f.id}>
           <label className="form-label">{f.label}</label>
-          <input className="form-control" type={f.type} placeholder={f.placeholder}
-            value={form[f.id]} onChange={e => onChange(f.id, e.target.value)} />
+          {f.id === "password" ? (
+            <div className="kp-admin-password-wrap">
+              <input
+                className="form-control kp-admin-password-input"
+                type={showPassword ? "text" : "password"}
+                placeholder={f.placeholder}
+                value={form[f.id]}
+                onChange={e => onChange(f.id, e.target.value)}
+              />
+              <button
+                type="button"
+                className="kp-admin-password-toggle"
+                onClick={() => setShowPassword((prev) => !prev)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                title={showPassword ? "Hide password" : "Show password"}
+              >
+                <EyeIcon open={showPassword} />
+              </button>
+            </div>
+          ) : (
+            f.id === "phone" ? (
+              <div className="kp-admin-phone-wrap">
+                <div className="kp-admin-phone-country">
+                  <img
+                    src={selectedPhoneCountry?.flagUrl}
+                    alt={`${selectedPhoneCountry?.name || "Country"} flag`}
+                    className="kp-admin-phone-flag"
+                    loading="lazy"
+                  />
+                  <select
+                    className="kp-admin-phone-cc"
+                    value={phoneCountry}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setPhoneCountry(next);
+                      const local = splitStoredPhone(form.phone || "").local;
+                      onChange("phone", composeStoredPhone(next, local));
+                    }}
+                    aria-label="Country code"
+                  >
+                    {PHONE_COUNTRIES.map((c) => (
+                      <option key={c.iso2} value={c.iso2}>
+                        {c.iso2 === phoneCountry ? `+${c.dialCode}` : `${c.name} (+${c.dialCode})`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <input
+                  className="form-control kp-admin-phone-input"
+                  type="text"
+                  inputMode="numeric"
+                  placeholder={f.placeholder}
+                  value={formatLocalPhone11(splitStoredPhone(form.phone || "", phoneCountry).local)}
+                  onChange={e => onChange("phone", composeStoredPhone(phoneCountry, digitsOnly(e.target.value, 11)))}
+                />
+              </div>
+            ) : f.id === "postalcode" ? (
+              <input
+                className="form-control"
+                type="text"
+                inputMode="numeric"
+                placeholder={f.placeholder}
+                value={form.postalcode}
+                onChange={e => onChange("postalcode", digitsOnly(e.target.value, 10))}
+              />
+            ) : (
+              <input
+                className="form-control"
+                type={f.type}
+                placeholder={f.placeholder}
+                value={form[f.id]}
+                onChange={e => onChange(f.id, e.target.value)}
+              />
+            )
+          )}
         </div>
       ))}
       <div className="form-group">
         <label className="form-label">Role</label>
-        <select className="form-control" value={form.status} onChange={e => onChange("status", e.target.value)}>
-          <option value="user">User</option>
-          <option value="admin">Staff</option>
-          <option value="admin">Admin</option>
-          <option value="admin">SuperAdmin</option>
-        </select>
+        <ThemedSelect
+          value={form.status}
+          onChange={v => onChange("status", v)}
+          options={roleOptions}
+          disabled={roleLocked}
+        />
       </div>
     </>
   );
@@ -149,6 +358,18 @@ function UserForm({ form, onChange, mode, imagePreview, onFileChange, onRemoveIm
 
 export default function UsersPage() {
   const cache = useCache();   // ← NEW
+  const canManage = canManageAdminPanels();
+  const canAssignElevated = canAssignElevatedRoles();
+  const currentUserId = useMemo(() => {
+    try {
+      const raw = localStorage.getItem("user");
+      const u = raw ? JSON.parse(raw) : null;
+      const id = Number(u?.id || 0);
+      return Number.isFinite(id) ? id : 0;
+    } catch {
+      return 0;
+    }
+  }, []);
 
   const [users,      setUsers]      = useState(() => cache.get(CACHE_KEY) ?? []);
   const [loading,    setLoading]    = useState(() => cache.get(CACHE_KEY) === null);
@@ -250,11 +471,27 @@ export default function UsersPage() {
   }
 
   function openEdit(user) {
+    if (!canManage) return;
+    const targetRole = String(user?.status || "").toLowerCase();
+    if (!canAssignElevated && targetRole === "superadmin") {
+      showToast("Only superadmin can edit a SuperAdmin account", "error");
+      return;
+    }
+    if (!canAssignElevated && targetRole === "admin") {
+      const targetId = Number(user?.id || 0);
+      if (!(currentUserId > 0 && targetId > 0 && targetId === currentUserId)) {
+        showToast("Only superadmin can edit other Admin accounts", "error");
+        return;
+      }
+    }
     setSelectedId(user.id);
     setForm({
       first_name: user.first_name ?? "",
       last_name:  user.last_name  ?? "",
       email:      user.email,
+      phone:      user.phone ?? "",
+      address:    user.address ?? "",
+      postalcode: user.postalcode ?? "",
       password:   "",
       status:     user.status?.toLowerCase(),
     });
@@ -264,6 +501,7 @@ export default function UsersPage() {
   }
 
   function openAdd() {
+    if (!canManage) return;
     setSelectedId(null);
     setForm(EMPTY_FORM);
     resetImageState(null);
@@ -279,6 +517,11 @@ export default function UsersPage() {
 
   function buildFormData(extraFields = {}) {
     const fd = new FormData();
+    // Fallback token for servers that drop Authorization on multipart.
+    try {
+      const token = localStorage.getItem("token");
+      if (token) fd.append("auth_token", token);
+    } catch {}
     Object.entries(form).forEach(([k, v]) => fd.append(k, v ?? ""));
     Object.entries(extraFields).forEach(([k, v]) => fd.append(k, v ?? ""));
     if (imageFile)   fd.append("image",        imageFile);
@@ -286,21 +529,48 @@ export default function UsersPage() {
     return fd;
   }
 
+  function buildUserFromForm(id, prev = null) {
+    const first = form.first_name?.trim() ?? "";
+    const last  = form.last_name?.trim() ?? "";
+    const username = `${first} ${last}`.trim() || prev?.username || "New User";
+    return {
+      ...(prev ?? {}),
+      id,
+      first_name: first,
+      last_name: last,
+      username,
+      email: form.email,
+      phone: form.phone ?? "",
+      address: form.address ?? "",
+      postalcode: form.postalcode ?? "",
+      status: form.status,
+      image_url: removeImage ? null : (imagePreview ?? prev?.image_url ?? null),
+      totalSpent: prev?.totalSpent ?? "₱0.00",
+      password: prev?.password ?? "••••••••",
+    };
+  }
+
   // ─── CRUD (invalidate cache on mutation) ─────────────────────────────────
 
   async function handleAdd() {
+    if (!canManage) return;
     setSaving(true);
     const loadId = showToast("Adding user…", "loading");
     try {
       const res  = await fetch(API, { method: "POST", headers: authHeader(), body: buildFormData() });
       const data = await res.json();
       if (!data.success) throw new Error(data.message);
+      const created = data.user ?? buildUserFromForm(data.id ?? Date.now(), null);
+      setUsers(prev => {
+        const next = [created, ...prev];
+        cache.set(CACHE_KEY, next);
+        return next;
+      });
       dismissToast(loadId);
       showToast("User added successfully", "success");
-      cache.invalidate(CACHE_KEY);             // ← bust cache
-      await loadUsers(true, true);             // ← force fresh fetch
       notifyUserUpdated();
       handleClose();
+      loadUsers(true, true);
     } catch (err) {
       dismissToast(loadId);
       showToast(err.message || "Failed to add user", "error");
@@ -310,18 +580,27 @@ export default function UsersPage() {
   }
 
   async function handleUpdate() {
+    if (!canManage) return;
     setSaving(true);
     const loadId = showToast("Saving changes…", "loading");
     try {
       const res  = await fetch(API, { method: "POST", headers: authHeader(), body: buildFormData({ id: selectedId, _method: "PUT" }) });
       const data = await res.json();
       if (!data.success) throw new Error(data.message);
+      setUsers(prev => {
+        const next = prev.map(u => {
+          if (u.id !== selectedId) return u;
+          const serverUser = data.user ?? null;
+          return serverUser ? { ...u, ...serverUser } : buildUserFromForm(selectedId, u);
+        });
+        cache.set(CACHE_KEY, next);
+        return next;
+      });
       dismissToast(loadId);
       showToast("User updated successfully", "success");
-      cache.invalidate(CACHE_KEY);             // ← bust cache
-      await loadUsers(true, true);             // ← force fresh fetch
       notifyUserUpdated();
       handleClose();
+      loadUsers(true, true);
     } catch (err) {
       dismissToast(loadId);
       showToast(err.message || "Failed to update user", "error");
@@ -331,6 +610,7 @@ export default function UsersPage() {
   }
 
   async function handleDelete() {
+    if (!canManage) return;
     if (!window.confirm("Delete this user?")) return;
     setSaving(true);
     const loadId = showToast("Deleting user…", "loading");
@@ -338,12 +618,16 @@ export default function UsersPage() {
       const res  = await fetch(API, { method: "DELETE", headers: { "Content-Type": "application/json", ...authHeader() }, body: JSON.stringify({ id: selectedId }) });
       const data = await res.json();
       if (!data.success) throw new Error(data.message);
+      setUsers(prev => {
+        const next = prev.filter(u => u.id !== selectedId);
+        cache.set(CACHE_KEY, next);
+        return next;
+      });
       dismissToast(loadId);
       showToast("User deleted", "success");
-      cache.invalidate(CACHE_KEY);             // ← bust cache
-      await loadUsers(true, true);             // ← force fresh fetch
       notifyUserUpdated();
       handleClose();
+      loadUsers(true, true);
     } catch (err) {
       dismissToast(loadId);
       showToast(err.message || "Failed to delete user", "error");
@@ -377,8 +661,8 @@ export default function UsersPage() {
 
       <div className="page-area">
         <PageHeader
-          title="Users"
-          onAdd={openAdd}
+          title={<><span>Users</span> <span style={{ color: "var(--text-muted)", fontWeight: 600 }}>({filtered.length})</span></>}
+          onAdd={canManage ? openAdd : undefined}
           search={search}
           onSearch={setSearch}
           showCategories
@@ -427,8 +711,8 @@ export default function UsersPage() {
                     filtered.map(u => (
                       <tr
                         key={u.id}
-                        className={`clickable${selectedId === u.id ? " selected" : ""}`}
-                        onClick={() => openEdit(u)}
+                        className={`${canManage ? "clickable" : ""}${selectedId === u.id ? " selected" : ""}`}
+                        onClick={() => canManage && openEdit(u)}
                       >
                         <td className="cell-id">{u.id}</td>
                         <td>
@@ -456,36 +740,39 @@ export default function UsersPage() {
         </div>
       </div>
 
-      <SlidePanel
-        isOpen={panelOpen}
-        onClose={handleClose}
-        title={panelMode === "add" ? "Add User" : "Edit User"}
-        mode={panelMode}
-        footer={panelMode === "edit" ? (
-          <>
-            <button className="btn btn-delete"  onClick={handleDelete} disabled={saving}>Delete</button>
-            <button className="btn btn-update"  onClick={handleUpdate} disabled={saving}>
-              {saving ? <><i className="bi bi-arrow-repeat spin" /> Saving…</> : "Update"}
-            </button>
-          </>
-        ) : (
-          <>
-            <button className="btn btn-cancel"  onClick={handleClose}  disabled={saving}>Cancel</button>
-            <button className="btn btn-primary" onClick={handleAdd}    disabled={saving}>
-              {saving ? <><i className="bi bi-arrow-repeat spin" /> Adding…</> : "Add"}
-            </button>
-          </>
-        )}
-      >
-        <UserForm
-          form={form}
-          onChange={updateForm}
+      {canManage && (
+        <SlidePanel
+          isOpen={panelOpen}
+          onClose={handleClose}
+          title={panelMode === "add" ? "Add User" : "Edit User"}
           mode={panelMode}
-          imagePreview={imagePreview}
-          onFileChange={handleFileChange}
-          onRemoveImage={handleRemoveImage}
-        />
-      </SlidePanel>
+          footer={panelMode === "edit" ? (
+            <>
+              <button className="btn btn-delete"  onClick={handleDelete} disabled={saving}>Delete</button>
+              <button className="btn btn-update"  onClick={handleUpdate} disabled={saving}>
+                {saving ? <><i className="bi bi-arrow-repeat spin" /> Saving…</> : "Update"}
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn btn-cancel"  onClick={handleClose}  disabled={saving}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleAdd}    disabled={saving}>
+                {saving ? <><i className="bi bi-arrow-repeat spin" /> Adding…</> : "Add"}
+              </button>
+            </>
+          )}
+        >
+          <UserForm
+            form={form}
+            onChange={updateForm}
+            mode={panelMode}
+            imagePreview={imagePreview}
+            onFileChange={handleFileChange}
+            onRemoveImage={handleRemoveImage}
+            canAssignElevated={canAssignElevated}
+          />
+        </SlidePanel>
+      )}
     </>
   );
 }

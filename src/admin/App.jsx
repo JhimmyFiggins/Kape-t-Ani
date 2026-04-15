@@ -13,6 +13,7 @@ import InventoryAlertPage    from "./pages/InventoryAlertPage";
 import UsersPage             from "./pages/UsersPage";
 import ComplaintsPage        from "./pages/ComplaintsPage";
 import TransactionsPage      from "./pages/TransactionsPage";
+import WebsiteContentPage    from "./pages/WebsiteContentPage";
 import { CacheProvider }     from "./data/CacheContext";  
 
 const PAGE_TITLES = {
@@ -20,21 +21,27 @@ const PAGE_TITLES = {
   inventory:      "Inventory",
   inventoryalert: "Inventory Alert",
   users:          "Users",
-  transactions:   "Transactions",
-};
-
-const PAGES = {
-  dashboard:      <DashboardPage />,
-  inventory:      <InventoryPage />,
-  inventoryalert: <InventoryAlertPage />,
-  users:          <UsersPage />,
-  complaints:     <ComplaintsPage />,
-  transactions:   <TransactionsPage />,
+  transactions:   "Transaction Log",
+  websitecontent: "Website Content",
 };
 
 export default function App() {
-  const [page, setPage]           = useState("dashboard");
+  const [page, setPage]           = useState(() => {
+    const saved = localStorage.getItem("admin.defaultPage");
+    return saved && PAGE_TITLES[saved] ? saved : "dashboard";
+  });
   const [collapsed, setCollapsed] = useState(false);
+
+  function renderPage() {
+    if (page === "dashboard") return <DashboardPage onNavigate={setPage} />;
+    if (page === "inventory") return <InventoryPage />;
+    if (page === "inventoryalert") return <InventoryAlertPage />;
+    if (page === "users") return <UsersPage />;
+    if (page === "complaints") return <ComplaintsPage />;
+    if (page === "transactions") return <TransactionsPage />;
+    if (page === "websitecontent") return <WebsiteContentPage />;
+    return <DashboardPage onNavigate={setPage} />;
+  }
 
   return (
     // ↓ CacheProvider wraps everything so all pages share one cache
@@ -56,8 +63,10 @@ export default function App() {
           <Topbar
             title={PAGE_TITLES[page]}
             onToggle={() => setCollapsed(c => !c)}
+            currentPage={page}
+            onNavigate={setPage}
           />
-          {PAGES[page]}
+          {renderPage()}
         </div>
       </div>
     </CacheProvider>

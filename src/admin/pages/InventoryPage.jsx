@@ -3,17 +3,19 @@
  * - Product ID is shown (read-only) in edit mode as a reference field
  *   but can be manually overridden if needed
  * - Product ID is hidden in add mode (auto-assigned by DB)
+ * - Discount (0–100%) can be set per product; Total Price is auto-computed
  */
 
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import Badge      from "../components/Badge";
 import PageHeader from "../components/PageHeader";
 import SlidePanel from "../components/SlidePanel";
+import { canManageAdminPanels } from "../utils";
 import { LINK_PATH } from "../data/LinkPath.jsx";
 import { useCache }  from "../data/CacheContext";
 
-const API            = `${LINK_PATH}inventoryController.php`;
-const API_CATEGORIES = `${LINK_PATH}inventoryController.php?resource=categories`;
+const API            = `${LINK_PATH}Inventorycontroller.php`;
+const API_CATEGORIES = `${LINK_PATH}Inventorycontroller.php?resource=categories`;
 const CACHE_PRODUCTS = "inventory";
 const CACHE_CATS     = "inventory_categories";
 
@@ -23,7 +25,7 @@ function authHeader() {
 }
 
 const EMPTY_FORM = {
-  name: "", description: "", price: "", qty: "", category_id: "",
+  name: "", description: "", price: "", qty: "", category_id: "", discount: "0",
 };
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -84,6 +86,10 @@ function ImageBlock({ preview, onFileChange, onRemove }) {
 // ─── Product Form ─────────────────────────────────────────────────────────────
 
 function InventoryForm({ form, onChange, mode, imagePreview, onFileChange, onRemoveImage, categories }) {
+  const price    = parseFloat(form.price) || 0;
+  const discount = Math.min(100, Math.max(0, parseInt(form.discount, 10) || 0));
+  const total    = price * (1 - discount / 100);
+
   return (
     <>
       <ImageBlock preview={imagePreview} onFileChange={onFileChange} onRemove={onRemoveImage} />
@@ -128,6 +134,72 @@ function InventoryForm({ form, onChange, mode, imagePreview, onFileChange, onRem
             value={form.qty} onChange={e => onChange("qty", e.target.value)} />
         </div>
       </div>
+
+      {/* ── Discount + Total Price ───────────────────────────────────────── */}
+      <div className="form-row cols-2">
+        <div className="form-group">
+          <label className="form-label">
+            Discount (%)
+            {discount > 0 && (
+              <span style={{
+                marginLeft: 6, fontSize: "0.72rem", fontWeight: 600,
+                background: "#FEF9C3", color: "#A16207",
+                padding: "1px 6px", borderRadius: 20,
+              }}>
+                {discount}% off
+              </span>
+            )}
+          </label>
+          <input
+            className="form-control"
+            type="number"
+            placeholder="0"
+            min="0"
+            max="100"
+            value={form.discount ?? "0"}
+            onChange={e => {
+              const val = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0));
+              onChange("discount", String(val));
+            }}
+          />
+        </div>
+        <div className="form-group">
+          <label className="form-label">
+            Total Price (₱)
+            <span style={{ marginLeft: 4, fontSize: "0.72rem", fontWeight: 400, color: "var(--text-muted)" }}>
+              (auto)
+            </span>
+          </label>
+          <input
+            className="form-control"
+            type="text"
+            readOnly
+            value={
+              price > 0
+                ? total.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                : "—"
+            }
+            style={{ background: "var(--bg-muted, #f3f4f6)", cursor: "default", color: "var(--text-muted)" }}
+          />
+        </div>
+      </div>
+
+      {/* Discount summary hint */}
+      {price > 0 && discount > 0 && (
+        <div style={{
+          fontSize: "0.78rem", color: "var(--text-muted)",
+          marginTop: -8, marginBottom: 12,
+          padding: "6px 10px",
+          background: "var(--bg-muted, #f3f4f6)",
+          borderRadius: 8,
+          border: "1px solid var(--border, #e5e7eb)",
+        }}>
+          ₱{price.toLocaleString("en-PH", { minimumFractionDigits: 2 })} &times; (1 &minus; {discount}%) ={" "}
+          <strong style={{ color: "var(--text, #111)" }}>
+            ₱{total.toLocaleString("en-PH", { minimumFractionDigits: 2 })}
+          </strong>
+        </div>
+      )}
 
       <div className="form-group">
         <label className="form-label">Category</label>
@@ -234,6 +306,7 @@ function ManageCategoriesPanel({ categories, onAdd, onDelete, saving }) {
 
 export default function InventoryPage() {
   const cache = useCache();
+  const canManage = canManageAdminPanels();
 
   const [products,   setProducts]   = useState(() => cache.get(CACHE_PRODUCTS) ?? []);
   const [categories, setCategories] = useState(() => cache.get(CACHE_CATS)     ?? []);
@@ -347,14 +420,16 @@ export default function InventoryPage() {
   function resetImageState(url = null) { setImageFile(null); setRemoveImage(false); setImagePreview(url); }
 
   function openEdit(product) {
+    if (!canManage) return;
     setSelectedId(product.id);
     setForm({
-      edit_id:     product.id,          // ← editable ID field
+      edit_id:     product.id,
       name:        product.name,
       description: product.description ?? "",
       price:       product.price,
       qty:         product.qty,
       category_id: product.category_id ?? "",
+      discount:    String(product.discount ?? 0),   // ← discount field
     });
     resetImageState(product.image_url ?? null);
     setPanelMode("edit");
@@ -362,6 +437,7 @@ export default function InventoryPage() {
   }
 
   function openAdd() {
+    if (!canManage) return;
     setSelectedId(null);
     setForm(EMPTY_FORM);
     resetImageState(null);
@@ -373,18 +449,43 @@ export default function InventoryPage() {
 
   function buildFormData(extraFields = {}) {
     const fd = new FormData();
-    // Spread form fields except edit_id (handled separately)
     const { edit_id, ...rest } = form;
     Object.entries(rest).forEach(([k, v]) => fd.append(k, v ?? ""));
     Object.entries(extraFields).forEach(([k, v]) => fd.append(k, v ?? ""));
     if (imageFile)   fd.append("image", imageFile);
     if (removeImage) fd.append("remove_image", "1");
     return fd;
+    // NOTE: discount is included automatically via ...rest spread above
+  }
+
+  function buildProductFromForm(id, prev = null) {
+    const priceNum = Number(form.price) || 0;
+    const discountNum = Math.min(100, Math.max(0, Number(form.discount) || 0));
+    const totalPrice = priceNum * (1 - discountNum / 100);
+    const selectedCategory = categories.find(c => Number(c.id) === Number(form.category_id));
+    const status =
+      Number(form.qty) === 0 ? "Out of Stock" : Number(form.qty) < 10 ? "Low Stock" : "Available";
+
+    return {
+      ...(prev ?? {}),
+      id,
+      name: form.name,
+      description: form.description,
+      price: String(form.price),
+      discount: discountNum,
+      totalprice: String(totalPrice),
+      qty: Number(form.qty) || 0,
+      category_id: Number(form.category_id) || null,
+      category: selectedCategory?.name ?? prev?.category ?? "Uncategorized",
+      status,
+      image_url: removeImage ? null : (imagePreview ?? prev?.image_url ?? null),
+    };
   }
 
   // ─── Category CRUD ────────────────────────────────────────────────────────
 
   async function handleAddCategory(name) {
+    if (!canManage) return;
     setCatSaving(true);
     try {
       const res  = await fetch(API_CATEGORIES, {
@@ -404,6 +505,7 @@ export default function InventoryPage() {
   }
 
   async function handleDeleteCategory(id, name) {
+    if (!canManage) return;
     if (!window.confirm(`Delete "${name}"? Products in this category will become uncategorized.`)) return;
     setCatSaving(true);
     try {
@@ -417,9 +519,17 @@ export default function InventoryPage() {
       const updated = categories.filter(c => c.id !== id);
       setCategories(updated);
       cache.set(CACHE_CATS, updated);
-      cache.invalidate(CACHE_PRODUCTS);
-      await loadProducts(true, true);
+      setProducts(prev => {
+        const next = prev.map(p =>
+          Number(p.category_id) === Number(id)
+            ? { ...p, category_id: null, category: "Uncategorized" }
+            : p
+        );
+        cache.set(CACHE_PRODUCTS, next);
+        return next;
+      });
       showToast(`Category "${name}" deleted`, "success");
+      loadProducts(true, true);
     } catch (err) {
       showToast(err.message || "Failed to delete category", "error");
     } finally { setCatSaving(false); }
@@ -428,17 +538,23 @@ export default function InventoryPage() {
   // ─── Product CRUD ─────────────────────────────────────────────────────────
 
   async function handleAdd() {
+    if (!canManage) return;
     setSaving(true);
     const loadId = showToast("Adding product…", "loading");
     try {
       const res  = await fetch(API, { method: "POST", headers: authHeader(), body: buildFormData() });
       const data = await res.json();
       if (!data.success) throw new Error(data.message);
+      const created = data.product ?? buildProductFromForm(data.id ?? Date.now(), null);
+      setProducts(prev => {
+        const next = [created, ...prev];
+        cache.set(CACHE_PRODUCTS, next);
+        return next;
+      });
       dismissToast(loadId);
       showToast("Product added successfully", "success");
-      cache.invalidate(CACHE_PRODUCTS);
-      await loadProducts(true, true);
       handleClose();
+      loadProducts(true, true);
     } catch (err) {
       dismissToast(loadId);
       showToast(err.message || "Failed to add product", "error");
@@ -446,9 +562,9 @@ export default function InventoryPage() {
   }
 
   async function handleUpdate() {
+    if (!canManage) return;
     setSaving(true);
     const loadId = showToast("Saving changes…", "loading");
-    // Use form.edit_id if admin changed it, otherwise fall back to selectedId
     const targetId = form.edit_id ? Number(form.edit_id) : selectedId;
     try {
       const res  = await fetch(API, {
@@ -458,11 +574,19 @@ export default function InventoryPage() {
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.message);
+      setProducts(prev => {
+        const next = prev.map(p => {
+          if (Number(p.id) !== Number(targetId)) return p;
+          const serverProduct = data.product ?? null;
+          return serverProduct ? { ...p, ...serverProduct } : buildProductFromForm(targetId, p);
+        });
+        cache.set(CACHE_PRODUCTS, next);
+        return next;
+      });
       dismissToast(loadId);
       showToast("Product updated successfully", "success");
-      cache.invalidate(CACHE_PRODUCTS);
-      await loadProducts(true, true);
       handleClose();
+      loadProducts(true, true);
     } catch (err) {
       dismissToast(loadId);
       showToast(err.message || "Failed to update product", "error");
@@ -470,6 +594,7 @@ export default function InventoryPage() {
   }
 
   async function handleDelete() {
+    if (!canManage) return;
     if (!window.confirm("Delete this product?")) return;
     setSaving(true);
     const loadId = showToast("Deleting product…", "loading");
@@ -481,11 +606,15 @@ export default function InventoryPage() {
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.message);
+      setProducts(prev => {
+        const next = prev.filter(p => Number(p.id) !== Number(selectedId));
+        cache.set(CACHE_PRODUCTS, next);
+        return next;
+      });
       dismissToast(loadId);
       showToast("Product deleted", "success");
-      cache.invalidate(CACHE_PRODUCTS);
-      await loadProducts(true, true);
       handleClose();
+      loadProducts(true, true);
     } catch (err) {
       dismissToast(loadId);
       showToast(err.message || "Failed to delete product", "error");
@@ -509,8 +638,8 @@ export default function InventoryPage() {
 
       <div className="page-area">
         <PageHeader
-          title="Inventory"
-          onAdd={openAdd}
+          title={<><span>Inventory</span> <span style={{ color: "var(--text-muted)", fontWeight: 600 }}>({filtered.length})</span></>}
+          onAdd={canManage ? openAdd : undefined}
           search={search}
           onSearch={setSearch}
           showCategories
@@ -519,7 +648,7 @@ export default function InventoryPage() {
           onCategoryChange={setFilter}
           sortOrder={sortOrder}
           onToggleSort={() => setSortOrder(prev => prev === "asc" ? "desc" : "asc")}
-          extraActions={
+          extraActions={canManage ? (
             <button
               className="btn btn-outline btn-sm"
               onClick={() => setCatPanelOpen(true)}
@@ -529,7 +658,7 @@ export default function InventoryPage() {
               <i className="bi bi-tags" />
               Categories
             </button>
-          }
+          ) : null}
         />
 
         <div className="split-layout">
@@ -542,6 +671,8 @@ export default function InventoryPage() {
                     <th>Image</th>
                     <th>Name</th>
                     <th>Price</th>
+                    <th>Discount</th>
+                    <th>Total Price</th>
                     <th>Stock</th>
                     <th>Category</th>
                     <th>Status</th>
@@ -550,7 +681,7 @@ export default function InventoryPage() {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={7} style={{ textAlign: "center", padding: 40 }}>
+                      <td colSpan={9} style={{ textAlign: "center", padding: 40 }}>
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, color: "var(--text-muted)" }}>
                           <i className="bi bi-arrow-repeat spin" style={{ fontSize: "1.4rem", color: "var(--brand-mid)" }} />
                           <span style={{ fontSize: "0.83rem" }}>Loading products…</span>
@@ -559,7 +690,7 @@ export default function InventoryPage() {
                     </tr>
                   ) : filtered.length === 0 ? (
                     <tr>
-                      <td colSpan={7} style={{ textAlign: "center", padding: 40 }}>
+                      <td colSpan={9} style={{ textAlign: "center", padding: 40 }}>
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, color: "var(--text-muted)" }}>
                           <i className="bi bi-box-seam" style={{ fontSize: "1.6rem" }} />
                           <span style={{ fontSize: "0.83rem" }}>No products found</span>
@@ -570,8 +701,8 @@ export default function InventoryPage() {
                     filtered.map(p => (
                       <tr
                         key={p.id}
-                        className={`clickable${selectedId === p.id ? " selected" : ""}`}
-                        onClick={() => openEdit(p)}
+                        className={`${canManage ? "clickable" : ""}${selectedId === p.id ? " selected" : ""}`}
+                        onClick={() => canManage && openEdit(p)}
                       >
                         <td className="cell-id">PRD-{String(p.id).padStart(3, "0")}</td>
                         <td>
@@ -586,6 +717,18 @@ export default function InventoryPage() {
                         </td>
                         <td className="cell-bold">{p.name}</td>
                         <td className="cell-amount">₱{Number(p.price).toLocaleString("en-PH", { minimumFractionDigits: 2 })}</td>
+                        <td className="cell-muted">
+                          {p.discount > 0
+                            ? <span style={{ color: "#A16207", fontWeight: 600 }}>{p.discount}%</span>
+                            : <span style={{ color: "var(--text-muted)" }}>—</span>}
+                        </td>
+                       <td className="cell-amount">
+                          ₱{(
+                            Number(p.discount) === 0
+                              ? Number(p.price)
+                              : Number(p.totalprice)
+                          ).toLocaleString("en-PH", { minimumFractionDigits: 2 })}
+                        </td>
                         <td className="cell-muted">{p.qty}</td>
                         <td className="cell-muted">{p.category}</td>
                         <td><Badge status={p.status} /></td>
@@ -600,55 +743,59 @@ export default function InventoryPage() {
       </div>
 
       {/* ── Product SlidePanel ─────────────────────────────────────────────── */}
-      <SlidePanel
-        isOpen={panelOpen}
-        onClose={handleClose}
-        title={panelMode === "add" ? "Add Product" : "Edit Product"}
-        mode={panelMode}
-        footer={panelMode === "edit" ? (
-          <>
-            <button className="btn btn-delete"  onClick={handleDelete} disabled={saving}>Delete</button>
-            <button className="btn btn-update"  onClick={handleUpdate} disabled={saving}>
-              {saving ? <><i className="bi bi-arrow-repeat spin" /> Saving…</> : "Update"}
-            </button>
-          </>
-        ) : (
-          <>
-            <button className="btn btn-cancel"  onClick={handleClose}  disabled={saving}>Cancel</button>
-            <button className="btn btn-primary" onClick={handleAdd}    disabled={saving}>
-              {saving ? <><i className="bi bi-arrow-repeat spin" /> Adding…</> : "Add Product"}
-            </button>
-          </>
-        )}
-      >
-        <InventoryForm
-          form={form}
-          onChange={updateForm}
+      {canManage && (
+        <SlidePanel
+          isOpen={panelOpen}
+          onClose={handleClose}
+          title={panelMode === "add" ? "Add Product" : "Edit Product"}
           mode={panelMode}
-          imagePreview={imagePreview}
-          onFileChange={handleFileChange}
-          onRemoveImage={handleRemoveImage}
-          categories={categories}
-        />
-      </SlidePanel>
+          footer={panelMode === "edit" ? (
+            <>
+              <button className="btn btn-delete"  onClick={handleDelete} disabled={saving}>Delete</button>
+              <button className="btn btn-update"  onClick={handleUpdate} disabled={saving}>
+                {saving ? <><i className="bi bi-arrow-repeat spin" /> Saving…</> : "Update"}
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn btn-cancel"  onClick={handleClose}  disabled={saving}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleAdd}    disabled={saving}>
+                {saving ? <><i className="bi bi-arrow-repeat spin" /> Adding…</> : "Add Product"}
+              </button>
+            </>
+          )}
+        >
+          <InventoryForm
+            form={form}
+            onChange={updateForm}
+            mode={panelMode}
+            imagePreview={imagePreview}
+            onFileChange={handleFileChange}
+            onRemoveImage={handleRemoveImage}
+            categories={categories}
+          />
+        </SlidePanel>
+      )}
 
       {/* ── Manage Categories SlidePanel ───────────────────────────────────── */}
-      <SlidePanel
-        isOpen={catPanelOpen}
-        onClose={() => setCatPanelOpen(false)}
-        title="Manage Categories"
-        mode="add"
-        footer={
-          <button className="btn btn-cancel" onClick={() => setCatPanelOpen(false)}>Close</button>
-        }
-      >
-        <ManageCategoriesPanel
-          categories={categories}
-          onAdd={handleAddCategory}
-          onDelete={handleDeleteCategory}
-          saving={catSaving}
-        />
-      </SlidePanel>
+      {canManage && (
+        <SlidePanel
+          isOpen={catPanelOpen}
+          onClose={() => setCatPanelOpen(false)}
+          title="Manage Categories"
+          mode="add"
+          footer={
+            <button className="btn btn-cancel" onClick={() => setCatPanelOpen(false)}>Close</button>
+          }
+        >
+          <ManageCategoriesPanel
+            categories={categories}
+            onAdd={handleAddCategory}
+            onDelete={handleDeleteCategory}
+            saving={catSaving}
+          />
+        </SlidePanel>
+      )}
     </>
   );
 }

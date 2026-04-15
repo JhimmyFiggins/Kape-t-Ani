@@ -1,3 +1,18 @@
+:root {
+  --brown-deep: #2c1a0e;
+  --brown-rich: #5a3825;
+  --brown-mid: #7d5035;
+  --brown-warm: #a0724a;
+  --gold: #b08d57;
+  --gold-light: #c9a96e;
+  --cream: #f5f0e8;
+  --cream-light: #faf7f2;
+  --white: #ffffff;
+  --text-dark: #1e120a;
+  --text-mid: #5a3825;
+  --text-light: #9e8070;
+}
+
 .home-wrapper {
   background-color: white;
 }
@@ -198,6 +213,18 @@
   font-weight: 600;
   letter-spacing: 0.1em;
   padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(181, 147, 120, 0.35);
+  backdrop-filter: blur(2px);
+}
+
+.not-for-sale-badge {
+  background: rgba(45, 27, 14, 0.9);
+  color: #f7efe7;
+  border-color: rgba(255, 255, 255, 0.24);
+  letter-spacing: 0.12em;
+  padding: 6px 12px;
+  box-shadow: 0 6px 18px rgba(45, 27, 14, 0.22);
 }
 .product-info {
   padding: 18px 4px 0;
@@ -348,7 +375,8 @@
   font-size: 0.65rem;
   letter-spacing: 0.15em;
   text-transform: uppercase;
-  color: var(--text-light);
+  color: #7c5a45 !important;
+  opacity: 1;
 }
 
 /* ── SUBSCRIBE ── */

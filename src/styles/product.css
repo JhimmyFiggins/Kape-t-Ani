@@ -334,6 +334,16 @@ body {
   color: var(--text-color);
 }
 
+.product-discount-row {
+  min-height: 18px;
+  font-size: 0.78rem;
+  margin-bottom: 10px;
+}
+
+.product-discount-placeholder {
+  visibility: hidden;
+}
+
 .product-card.hidden {
   display: none;
 }
@@ -362,6 +372,11 @@ body {
   font-weight: 700;
   text-transform: uppercase;
   font-size: 0.8rem;
+}
+
+.shop-btn.added {
+  background: #8b5e3c;
+  box-shadow: 0 0 0 1px rgba(139, 94, 60, 0.18), 0 6px 14px rgba(139, 94, 60, 0.22);
 }
 /* This darkens the screen and centers the modal */
 .pp-overlay {
